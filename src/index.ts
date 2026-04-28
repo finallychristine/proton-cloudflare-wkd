@@ -11,35 +11,44 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import https from 'node:https';
-
-const wkdUrl = /\/\.well-known\/openpgpkey\/([a-zA-Z0-9.]+)\/policy/
-const protonHostname = "https://api.protonmail.ch"
+const ALLOWED_PATH = /^\/\.well-known\/openpgpkey\//
+const PROTON_BASE_URL = "https://api.protonmail.ch"
+const ALLOWED_METHODS = ['GET', 'HEAD']
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
-		if (request.method !== 'GET') {
-			return new Response('Method not allowed', { status: 405 });
+		if (!ALLOWED_METHODS.includes(request.method)) {
+			return new Response(`Request method '${request.method}' is not in allowed methods: ${ALLOWED_METHODS}`, { status: 405 });
 		}
 
-		const url = URL.parse(request.url);
-		if (url == null) {
-			throw new Error('null URL');
+		const requestUrl = URL.parse(request.url);
+		if (requestUrl == null) {
+			throw new Error('Could not parse request URL');
 		}
 
-		const path = url.pathname
+		const path = requestUrl.pathname
 
-		if (!path.match(wkdUrl)) {
-			return new Response('URL should match: /.well-known/openpgpkey/example.com/policy', { status: 400 });
+		if (!path.match(ALLOWED_PATH)) {
+			return new Response('URL should start with: /.well-known/openpgpkey/example.com', { status: 400 });
 		}
 
+		const proxyUrl = new URL(PROTON_BASE_URL)
+		proxyUrl.pathname = requestUrl.pathname
+		proxyUrl.search = requestUrl.search
 
-		const proxyResp = await fetch(`https://${protonHostname}${path}`, {
-			method: 'GET',
+
+		console.log(`Querying: ${proxyUrl}`)
+
+		const proxyResp = await fetch(proxyUrl, {
+			method: request.method,
+			headers: {
+				'User-Agent': 'github.com/finallychristine/proton-cloudflare-wkd',
+			}
 		})
 
-		console.log(proxyResp.status)
+		const response = new Response(proxyResp.body, proxyResp)
+		response.headers.set('Access-Control-Allow-Origin', '*')
 
-		return new Response("Hello World!");
+		return response
 	},
 } satisfies ExportedHandler<Env>;
